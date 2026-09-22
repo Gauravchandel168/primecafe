@@ -1,0 +1,62 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isRestaurantOwner(restaurantId) {
+      return request.auth != null
+        && exists(/databases/$(database)/documents/restaurants/$(restaurantId))
+        && get(/databases/$(database)/documents/restaurants/$(restaurantId)).data.ownerId == request.auth.uid;
+    }
+
+    function isRestaurantAdmin(restaurantId) {
+      return request.auth != null && (
+        isRestaurantOwner(restaurantId)
+        || (
+          exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+          && (
+            get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.restaurantId == restaurantId
+            || get(/databases/$(database)/documents/admins/$(request.auth.uid)).data.cafeId == restaurantId
+          )
+        )
+      );
+    }
+
+    match /restaurants/{restaurantId} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isRestaurantAdmin(restaurantId);
+
+      match /categories/{categoryId} {
+        allow read: if true;
+        allow write: if isRestaurantAdmin(restaurantId);
+
+        match /items/{itemId} {
+          allow read: if true;
+          allow write: if isRestaurantAdmin(restaurantId);
+        }
+      }
+
+      match /orders/{orderId} {
+        // Anyone who already has a specific order id (e.g. from the
+        // order-status link) can fetch that one order. Only staff can
+        // list/query the full orders collection — this stops a stranger
+        // from browsing every table's orders for the cafe.
+        allow get: if true;
+        allow list: if isRestaurantAdmin(restaurantId);
+        allow create: if true;
+        allow update, delete: if isRestaurantAdmin(restaurantId);
+      }
+    }
+
+    match /admins/{uid} {
+      allow read: if request.auth != null && request.auth.uid == uid;
+      allow create: if request.auth != null
+        && request.auth.uid == uid
+        && !exists(/databases/$(database)/documents/admins/$(uid))
+        && request.resource.data.keys().hasAll(['email'])
+        && (request.resource.data.keys().hasAny(['restaurantId', 'cafeId']));
+      allow update, delete: if false;
+    }
+  }
+}

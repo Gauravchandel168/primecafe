@@ -1,0 +1,12 @@
+{
+  "rules": {
+    "liveOrders": {
+      "$cafeId": {
+        "$orderId": {
+          ".read": true,
+          ".write": "auth != null || (!data.exists() && newData.hasChildren(['status', 'tableNumber', 'totalAmount', 'updatedAt']) && newData.child('status').val() == 'pending')"
+        }
+      }
+    }
+  }
+}
