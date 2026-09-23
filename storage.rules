@@ -1,0 +1,30 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isRestaurantAdmin(restaurantId) {
+      return request.auth != null && (
+        (
+          firestore.exists(/databases/(default)/documents/restaurants/$(restaurantId))
+          && firestore.get(/databases/(default)/documents/restaurants/$(restaurantId)).data.ownerId == request.auth.uid
+        )
+        || (
+          firestore.exists(/databases/(default)/documents/admins/$(request.auth.uid))
+          && (
+            firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data.restaurantId == restaurantId
+            || firestore.get(/databases/(default)/documents/admins/$(request.auth.uid)).data.cafeId == restaurantId
+          )
+        )
+      );
+    }
+
+    // Menu item photos and the cafe hero image both live under
+    // restaurants/{restaurantId}/... — anyone can view them (they're
+    // shown on the public menu), only that cafe's own admin can upload.
+    match /restaurants/{restaurantId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isRestaurantAdmin(restaurantId)
+        && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+  }
+}

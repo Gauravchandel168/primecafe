@@ -5,6 +5,7 @@ import toast from 'react-hot-toast';
 import { syncOrderToRTDB } from '../firebase';
 import { CartProvider, useCart } from '../context/CartContext';
 import CartDrawer from '../components/CartDrawer';
+import OrderSuccessModal from '../components/OrderSuccessModal';
 import { FloatingCartButton } from '../components/NotificationBadge';
 import {
   MenuHero,
@@ -19,6 +20,18 @@ import {
   restaurantRef,
 } from '../utils/restaurantPaths';
 
+// If Firestore/RTDB never resolves (e.g. a flaky connection), this makes
+// sure the "Placing Order..." button always comes back to life instead of
+// staying stuck forever and forcing the customer to hit back.
+function withTimeout(promise, ms = 15000) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Request timed out')), ms)
+    ),
+  ]);
+}
+
 function MenuContent() {
   const params = useParams();
   const [searchParams] = useSearchParams();
@@ -32,6 +45,7 @@ function MenuContent() {
   const [error, setError] = useState(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [placing, setPlacing] = useState(false);
+  const [placedOrder, setPlacedOrder] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 600);
 
   const { itemCount, subtotal, clearCart, addItem, items } = useCart();
@@ -75,6 +89,14 @@ function MenuContent() {
     };
   }, [restaurantId]);
 
+  useEffect(() => {
+    if (!placedOrder) return;
+    const timer = setTimeout(() => {
+      navigate(`/order-status/${restaurantId}/${placedOrder.orderId}`);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, [placedOrder, restaurantId, navigate]);
+
   const horizontalPadding = isMobile ? 12 : 80;
   const cardWidth = isMobile ? 160 : 250;
   const cardHeight = isMobile ? 250 : 280;
@@ -109,24 +131,31 @@ function MenuContent() {
         restaurantId,
       };
 
-      const docRef = await addDoc(ordersRef(restaurantId), orderData);
+      const docRef = await withTimeout(addDoc(ordersRef(restaurantId), orderData));
 
-      await syncOrderToRTDB(restaurantId, docRef.id, {
-        status: 'pending',
-        tableNumber,
-        totalAmount: subtotal,
-      });
+      await withTimeout(
+        syncOrderToRTDB(restaurantId, docRef.id, {
+          status: 'pending',
+          tableNumber,
+          totalAmount: subtotal,
+        })
+      );
 
       localStorage.setItem(`primecafe_order_${restaurantId}`, docRef.id);
       clearCart();
       setCartOpen(false);
-      toast.success('Order placed!');
-      navigate(`/order-status/${restaurantId}/${docRef.id}`);
-    } catch {
-      toast.error('Failed to place order. Please try again.');
+      setPlacedOrder({ orderId: docRef.id, tableNumber });
+    } catch (err) {
+      console.error('Failed to place order:', err);
+      toast.error('Failed to place order. Please check your connection and try again.');
     } finally {
       setPlacing(false);
     }
+  };
+
+  const handleTrackOrder = () => {
+    if (!placedOrder) return;
+    navigate(`/order-status/${restaurantId}/${placedOrder.orderId}`);
   };
 
   if (error) {
@@ -151,12 +180,14 @@ function MenuContent() {
 
       <div className="mt-8">
         {loading ? (
-          <div className="space-y-2 px-5">
-            {Array.from({ length: 8 }).map((_, i) => (
-              <div key={i} className="mx-auto h-12 w-40 animate-pulse rounded bg-gray-200" />
-            ))}
+          <>
+            <div className="space-y-2 px-5">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <div key={i} className="mx-auto h-12 w-40 animate-pulse rounded bg-gray-200" />
+              ))}
+            </div>
             <MenuFooter restaurant={restaurant} />
-          </div>
+          </>
         ) : categories.length === 0 ? (
           <>
             <p className="py-8 text-center font-amatic text-2xl text-black">
@@ -200,6 +231,13 @@ function MenuContent() {
         placing={placing}
         currency="€"
       />
+
+      {placedOrder && (
+        <OrderSuccessModal
+          tableNumber={placedOrder.tableNumber}
+          onTrackOrder={handleTrackOrder}
+        />
+      )}
     </div>
   );
 }

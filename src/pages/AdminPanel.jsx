@@ -28,6 +28,7 @@ import { useAuth } from '../context/AuthContext';
 import OrderCard from '../components/OrderCard';
 import BillModal from '../components/BillModal';
 import NotificationBadge from '../components/NotificationBadge';
+import ImageUploadField from '../components/ImageUploadField';
 import {
   playNewOrderSound,
   useDocumentTitleBadge,
@@ -507,11 +508,11 @@ export default function AdminPanel() {
                   className="rounded-xl border border-gray-200 px-3 py-2"
                   required
                 />
-                <input
-                  placeholder="Image URL"
+                <ImageUploadField
                   value={newItem.image}
-                  onChange={(e) => setNewItem({ ...newItem, image: e.target.value })}
-                  className="rounded-xl border border-gray-200 px-3 py-2 sm:col-span-2"
+                  onChange={(url) => setNewItem({ ...newItem, image: url })}
+                  folder={`restaurants/${restaurantId}/items`}
+                  label="Item photo"
                 />
                 <textarea
                   placeholder="Description"
@@ -567,13 +568,11 @@ export default function AdminPanel() {
                               }
                               className="rounded border px-2 py-1"
                             />
-                            <input
+                            <ImageUploadField
                               value={editing.image}
-                              onChange={(e) =>
-                                setEditing({ ...editing, image: e.target.value })
-                              }
-                              className="rounded border px-2 py-1 sm:col-span-2"
-                              placeholder="Image URL"
+                              onChange={(url) => setEditing({ ...editing, image: url })}
+                              folder={`restaurants/${restaurantId}/items`}
+                              label="Item photo"
                             />
                             <textarea
                               value={editing.description}
@@ -775,17 +774,12 @@ export default function AdminPanel() {
               />
             </div>
 
-            <div>
-              <label className="mb-1 block text-sm font-medium text-gray-700">
-                Hero image URL
-              </label>
-              <input
-                value={settings.heroImage}
-                onChange={(e) => setSettings({ ...settings, heroImage: e.target.value })}
-                className="w-full rounded-xl border border-gray-200 px-3 py-2"
-                placeholder="https://..."
-              />
-            </div>
+            <ImageUploadField
+              value={settings.heroImage}
+              onChange={(url) => setSettings({ ...settings, heroImage: url })}
+              folder={`restaurants/${restaurantId}/hero`}
+              label="Hero image"
+            />
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
