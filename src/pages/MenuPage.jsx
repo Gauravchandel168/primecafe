@@ -48,6 +48,9 @@ function MenuContent() {
   const [placing, setPlacing] = useState(false);
   const [placedOrder, setPlacedOrder] = useState(null);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 600);
+  const [existingOrderId, setExistingOrderId] = useState(
+    () => localStorage.getItem(`primecafe_order_${restaurantId}`) || null
+  );
 
   const { itemCount, subtotal, clearCart, addItem, items } = useCart();
 
@@ -205,6 +208,7 @@ function MenuContent() {
       }
 
       localStorage.setItem(`primecafe_order_${restaurantId}`, orderId);
+      setExistingOrderId(orderId);
       clearCart();
       setCartOpen(false);
       setPlacedOrder({ orderId, tableNumber, isAddOn });
@@ -282,6 +286,16 @@ function MenuContent() {
           </>
         )}
       </div>
+
+      {existingOrderId && (
+        <button
+          type="button"
+          onClick={() => navigate(`/order-status/${restaurantId}/${existingOrderId}`)}
+          className="fixed bottom-6 left-6 z-30 rounded-full bg-dark px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:opacity-90 active:scale-95"
+        >
+          View my order
+        </button>
+      )}
 
       {itemCount > 0 && (
         <FloatingCartButton itemCount={itemCount} onClick={() => setCartOpen(true)} />
