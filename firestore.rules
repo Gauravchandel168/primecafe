@@ -45,7 +45,18 @@ service cloud.firestore {
         allow get: if true;
         allow list: if isRestaurantAdmin(restaurantId);
         allow create: if true;
-        allow update, delete: if isRestaurantAdmin(restaurantId);
+        allow delete: if isRestaurantAdmin(restaurantId);
+
+        // A customer adding more items to their own order later (before
+        // the kitchen has started preparing it) may only touch the
+        // items/total/isUpdated fields — status, table number and
+        // everything else stays locked to staff.
+        allow update: if isRestaurantAdmin(restaurantId) || (
+          resource.data.status in ['pending', 'confirmed']
+          && request.resource.data.status == resource.data.status
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['items', 'totalAmount', 'isUpdated', 'updatedAt'])
+        );
       }
     }
 
@@ -54,8 +65,8 @@ service cloud.firestore {
       allow create: if request.auth != null
         && request.auth.uid == uid
         && !exists(/databases/$(database)/documents/admins/$(uid))
-        && request.resource.data.keys().hasAll(['email'])
-        && (request.resource.data.keys().hasAny(['restaurantId', 'cafeId']));
+        && request.resource.data.keys().hasAll(['email', 'restaurantId'])
+        && isRestaurantOwner(request.resource.data.restaurantId);
       allow update, delete: if false;
     }
   }

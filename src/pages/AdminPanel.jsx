@@ -202,7 +202,7 @@ export default function AdminPanel() {
   }, [orders, orderFilter]);
 
   const handleStatusChange = async (orderId, newStatus) => {
-    await updateDoc(orderRef(restaurantId, orderId), { status: newStatus });
+    await updateDoc(orderRef(restaurantId, orderId), { status: newStatus, isUpdated: false });
     const order = orders.find((o) => o.id === orderId);
     await syncOrderToRTDB(restaurantId, orderId, {
       status: newStatus,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom';
-import { addDoc, getDoc, serverTimestamp } from 'firebase/firestore';
+import { addDoc, getDoc, serverTimestamp, updateDoc } from 'firebase/firestore';
 import toast from 'react-hot-toast';
 import { syncOrderToRTDB } from '../firebase';
 import { CartProvider, useCart } from '../context/CartContext';
@@ -15,6 +15,7 @@ import {
 } from '../components/FlutterMenu';
 import {
   fetchCategoriesWithAvailableItems,
+  orderRef,
   ordersRef,
   resolveMenuRestaurantId,
   restaurantRef,
@@ -116,35 +117,97 @@ function MenuContent() {
     if (items.length === 0) return;
     setPlacing(true);
 
+    const newItems = items.map(({ id, name, price, quantity }) => ({
+      id,
+      name,
+      price,
+      quantity,
+    }));
+
     try {
-      const orderData = {
-        items: items.map(({ id, name, price, quantity }) => ({
-          id,
-          name,
-          price,
-          quantity,
-        })),
-        totalAmount: subtotal,
-        tableNumber,
-        status: 'pending',
-        timestamp: serverTimestamp(),
-        restaurantId,
-      };
+      const existingOrderId = localStorage.getItem(`primecafe_order_${restaurantId}`);
+      let orderId = null;
+      let isAddOn = false;
 
-      const docRef = await withTimeout(addDoc(ordersRef(restaurantId), orderData));
+      if (existingOrderId) {
+        try {
+          const existingSnap = await withTimeout(
+            getDoc(orderRef(restaurantId, existingOrderId))
+          );
+          const existing = existingSnap.exists() ? existingSnap.data() : null;
 
-      await withTimeout(
-        syncOrderToRTDB(restaurantId, docRef.id, {
-          status: 'pending',
-          tableNumber,
+          // Only merge into an order the kitchen hasn't started on yet.
+          // Once it's preparing/ready/delivered, a fresh order is safer
+          // than quietly changing what's already being made.
+          if (existing && ['pending', 'confirmed'].includes(existing.status)) {
+            const mergedItems = [...(existing.items || [])];
+            for (const item of newItems) {
+              const match = mergedItems.find((i) => i.id === item.id);
+              if (match) {
+                match.quantity += item.quantity;
+              } else {
+                mergedItems.push(item);
+              }
+            }
+            const mergedTotal = mergedItems.reduce(
+              (sum, i) => sum + i.price * i.quantity,
+              0
+            );
+
+            await withTimeout(
+              updateDoc(orderRef(restaurantId, existingOrderId), {
+                items: mergedItems,
+                totalAmount: mergedTotal,
+                isUpdated: true,
+                updatedAt: serverTimestamp(),
+              })
+            );
+
+            orderId = existingOrderId;
+            isAddOn = true;
+          }
+        } catch (lookupErr) {
+          // If we can't confirm the old order is still open, don't block
+          // the customer — just place a fresh order below.
+          console.warn('Could not check existing order, placing a new one:', lookupErr);
+        }
+      }
+
+      if (!orderId) {
+        const orderData = {
+          items: newItems,
           totalAmount: subtotal,
-        })
-      );
+          tableNumber,
+          status: 'pending',
+          timestamp: serverTimestamp(),
+          restaurantId,
+        };
+        const docRef = await withTimeout(addDoc(ordersRef(restaurantId), orderData));
+        orderId = docRef.id;
+      }
 
-      localStorage.setItem(`primecafe_order_${restaurantId}`, docRef.id);
+      // The Realtime Database sync only powers the extra-fast "live"
+      // status ping for a brand-new order — Firestore (above) is the
+      // source of truth and is already saved at this point. An add-on
+      // merge doesn't touch status, so there's nothing new to push here.
+      if (!isAddOn) {
+        try {
+          await withTimeout(
+            syncOrderToRTDB(restaurantId, orderId, {
+              status: 'pending',
+              tableNumber,
+              totalAmount: subtotal,
+            })
+          );
+        } catch (rtdbErr) {
+          console.warn('RTDB sync failed (order was still placed):', rtdbErr);
+        }
+      }
+
+      localStorage.setItem(`primecafe_order_${restaurantId}`, orderId);
       clearCart();
       setCartOpen(false);
-      setPlacedOrder({ orderId: docRef.id, tableNumber });
+      setPlacedOrder({ orderId, tableNumber, isAddOn });
     } catch (err) {
       console.error('Failed to place order:', err);
       toast.error('Failed to place order. Please check your connection and try again.');
@@ -174,7 +237,7 @@ function MenuContent() {
   }
 
   return (
-    <div className="min-h-screen bg-white pb-24">
+    <div className="min-h-screen bg-white">
       <MenuHero isMobile={isMobile} restaurant={restaurant} />
       <MenuTagline isMobile={isMobile} restaurant={restaurant} />
 
@@ -235,6 +298,7 @@ function MenuContent() {
       {placedOrder && (
         <OrderSuccessModal
           tableNumber={placedOrder.tableNumber}
+          isAddOn={placedOrder.isAddOn}
           onTrackOrder={handleTrackOrder}
         />
       )}

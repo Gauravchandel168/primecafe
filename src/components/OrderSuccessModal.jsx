@@ -1,6 +1,6 @@
 import { FiCheckCircle } from 'react-icons/fi';
 
-export default function OrderSuccessModal({ tableNumber, onTrackOrder }) {
+export default function OrderSuccessModal({ tableNumber, isAddOn, onTrackOrder }) {
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-6">
       <div className="animate-pop w-full max-w-sm rounded-3xl bg-white p-8 text-center shadow-2xl">
@@ -8,11 +8,13 @@ export default function OrderSuccessModal({ tableNumber, onTrackOrder }) {
           <FiCheckCircle className="text-4xl text-green-600" />
         </div>
         <h2 className="mt-4 text-xl font-bold text-dark">
-          Order placed successfully!
+          {isAddOn ? 'Order updated successfully!' : 'Order placed successfully!'}
         </h2>
         <p className="mt-2 text-sm text-gray-500">
           {tableNumber ? `Table ${tableNumber} — ` : ''}
-          Your order is on its way to the kitchen.
+          {isAddOn
+            ? 'Your new items have been added to your order.'
+            : 'Your order is on its way to the kitchen.'}
         </p>
         <button
           type="button"

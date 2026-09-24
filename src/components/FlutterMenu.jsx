@@ -22,8 +22,8 @@ export function MenuHero({ isMobile, restaurant }) {
   const mapsUrl = restaurant?.mapsUrl;
 
   return (
-    <div className="relative w-full" style={{ height: heroHeight }}>
-      <img src={heroImage} alt={name} className="h-full w-full object-cover" />
+    <div className="relative w-full bg-black" style={{ height: heroHeight }}>
+      <img src={heroImage} alt={name} className="h-full w-full object-contain" />
       <div className="absolute inset-0 bg-black/50" />
 
       {(phone || whatsapp || mapsUrl) && (
@@ -146,6 +146,7 @@ export function FlutterMenuItemCard({
   const description = item.description || '';
   const hasLongDesc = description.length > 20;
   const imageUrl = (item.image || '').trim();
+  const contentHeight = expanded ? cardHeight * 0.5 + 140 : cardHeight * 0.5;
   const height = expanded ? cardHeight + 140 : cardHeight;
 
   return (
@@ -168,7 +169,7 @@ export function FlutterMenuItemCard({
         )}
       </div>
 
-      <div className="flex flex-col p-2" style={{ height: cardHeight * 0.5 }}>
+      <div className="flex flex-col p-2" style={{ height: contentHeight }}>
         <p className="truncate font-poppins text-sm font-medium text-black">{item.name}</p>
 
         <div className="mt-1 min-h-0 flex-1 overflow-y-auto">
@@ -183,7 +184,7 @@ export function FlutterMenuItemCard({
             <button
               type="button"
               onClick={() => setExpanded((v) => !v)}
-              className="mt-0.5 font-poppins text-[10px] font-semibold text-[#1C1C1C]"
+              className="mt-1 font-poppins text-xs font-semibold text-[#1C1C1C]"
             >
               {expanded ? 'Read Less ▲' : 'Read More ▼'}
             </button>
