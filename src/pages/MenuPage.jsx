@@ -14,7 +14,7 @@ import {
   MenuCategorySection,
 } from '../components/FlutterMenu';
 import {
-  fetchCategoriesWithAvailableItems,
+  fetchCategories,
   orderRef,
   ordersRef,
   resolveMenuRestaurantId,
@@ -31,6 +31,20 @@ function withTimeout(promise, ms = 15000) {
       setTimeout(() => reject(new Error('Request timed out')), ms)
     ),
   ]);
+}
+
+function addOrderToHistory(restaurantId, orderId) {
+  try {
+    const key = `primecafe_orders_${restaurantId}`;
+    const raw = localStorage.getItem(key);
+    const ids = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(ids) && !ids.includes(orderId)) {
+      ids.push(orderId);
+      localStorage.setItem(key, JSON.stringify(ids));
+    }
+  } catch {
+    // localStorage can fail (private mode, quota) — not worth blocking the order over
+  }
 }
 
 function MenuContent() {
@@ -51,6 +65,15 @@ function MenuContent() {
   const [existingOrderId, setExistingOrderId] = useState(
     () => localStorage.getItem(`primecafe_order_${restaurantId}`) || null
   );
+  const [hasOrderHistory, setHasOrderHistory] = useState(() => {
+    try {
+      const raw = localStorage.getItem(`primecafe_orders_${restaurantId}`);
+      const ids = raw ? JSON.parse(raw) : [];
+      return Array.isArray(ids) && ids.length > 0;
+    } catch {
+      return false;
+    }
+  });
 
   const { itemCount, subtotal, clearCart, addItem, items } = useCart();
 
@@ -78,7 +101,7 @@ function MenuContent() {
           return;
         }
         if (active) setRestaurant({ id: restaurantSnap.id, ...restaurantSnap.data() });
-        const cats = await fetchCategoriesWithAvailableItems(restaurantId);
+        const cats = await fetchCategories(restaurantId);
         if (active) setCategories(cats);
       } catch {
         if (active) setError('Failed to load menu');
@@ -96,7 +119,7 @@ function MenuContent() {
   useEffect(() => {
     if (!placedOrder) return;
     const timer = setTimeout(() => {
-      navigate(`/order-status/${restaurantId}/${placedOrder.orderId}`);
+      navigate(`/my-orders/${restaurantId}`);
     }, 4000);
     return () => clearTimeout(timer);
   }, [placedOrder, restaurantId, navigate]);
@@ -187,6 +210,8 @@ function MenuContent() {
         };
         const docRef = await withTimeout(addDoc(ordersRef(restaurantId), orderData));
         orderId = docRef.id;
+        addOrderToHistory(restaurantId, orderId);
+        setHasOrderHistory(true);
       }
 
       // The Realtime Database sync only powers the extra-fast "live"
@@ -222,7 +247,7 @@ function MenuContent() {
 
   const handleTrackOrder = () => {
     if (!placedOrder) return;
-    navigate(`/order-status/${restaurantId}/${placedOrder.orderId}`);
+    navigate(`/my-orders/${restaurantId}`);
   };
 
   if (error) {
@@ -287,13 +312,13 @@ function MenuContent() {
         )}
       </div>
 
-      {existingOrderId && (
+      {hasOrderHistory && (
         <button
           type="button"
-          onClick={() => navigate(`/order-status/${restaurantId}/${existingOrderId}`)}
+          onClick={() => navigate(`/my-orders/${restaurantId}`)}
           className="fixed bottom-6 left-6 z-30 rounded-full bg-dark px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:opacity-90 active:scale-95"
         >
-          View my order
+          View my orders
         </button>
       )}
 

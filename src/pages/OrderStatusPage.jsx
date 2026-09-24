@@ -160,6 +160,12 @@ export default function OrderStatusPage() {
         >
           Order more items
         </Link>
+        <Link
+          to={`/my-orders/${restaurantId}`}
+          className="mt-2 block text-center text-sm text-gray-500 hover:underline"
+        >
+          View all my orders
+        </Link>
       </main>
     </div>
   );

@@ -66,24 +66,12 @@ export async function resolveRestaurantId(uid) {
   return null;
 }
 
-export async function fetchCategoriesWithAvailableItems(restaurantId) {
+// Used on initial menu load — just the category names, no per-category
+// item queries. Items (and whether a category has any available ones)
+// are only fetched when the customer actually opens that category.
+export async function fetchCategories(restaurantId) {
   const categoriesSnap = await getDocs(categoriesRef(restaurantId));
-  const valid = [];
-
-  for (const categoryDoc of categoriesSnap.docs) {
-    const itemsSnap = await getDocs(
-      query(
-        itemsRef(restaurantId, categoryDoc.id),
-        where('isAvailable', '==', true),
-        limit(1)
-      )
-    );
-    if (!itemsSnap.empty) {
-      valid.push({ id: categoryDoc.id, ...categoryDoc.data() });
-    }
-  }
-
-  return valid;
+  return categoriesSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
 }
 
 export async function fetchAvailableItems(restaurantId, categoryId) {
