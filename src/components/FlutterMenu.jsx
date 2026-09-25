@@ -88,16 +88,16 @@ export function MenuTagline({ isMobile, restaurant }) {
   return (
     <>
       <p
-        className={`mt-8 text-center font-amatic font-extrabold tracking-[2px] text-black ${
-          isMobile ? 'text-lg' : 'text-[26px]'
+        className={`mt-8 text-center font-poppins font-bold tracking-[1px] text-black ${
+          isMobile ? 'text-lg' : 'text-2xl'
         }`}
       >
         {tagline}
       </p>
       {allergenNote && (
         <p
-          className={`mx-auto mt-8 max-w-xl whitespace-pre-line text-center font-amatic font-semibold tracking-[2px] text-black ${
-            isMobile ? 'text-lg' : 'text-2xl'
+          className={`mx-auto mt-8 max-w-xl whitespace-pre-line text-center font-poppins font-bold tracking-[0.5px] text-black ${
+            isMobile ? 'text-base' : 'text-xl'
           }`}
         >
           {allergenNote}
@@ -159,7 +159,7 @@ export function FlutterMenuItemCard({
           <img
             src={imageUrl}
             alt={item.name}
-            className="h-full w-full object-cover"
+            className="h-full w-full object-contain"
             loading="lazy"
           />
         ) : (
@@ -248,8 +248,8 @@ export function MenuCategorySection({
         className="flex w-full items-center justify-between px-5 py-4"
       >
         <span
-          className={`mx-auto font-amatic font-semibold tracking-[2px] text-black ${
-            isMobile ? 'text-lg' : 'text-2xl'
+          className={`mx-auto font-poppins font-bold tracking-[1px] text-black ${
+            isMobile ? 'text-base' : 'text-xl'
           }`}
         >
           {category.name}

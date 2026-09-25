@@ -92,19 +92,49 @@ function MenuContent() {
         setLoading(false);
         return;
       }
-      setLoading(true);
+
+      const cacheKey = `primecafe_menu_cache_${restaurantId}`;
+      let hadCache = false;
+      try {
+        const cached = JSON.parse(sessionStorage.getItem(cacheKey) || 'null');
+        if (cached?.restaurant && cached?.categories) {
+          setRestaurant(cached.restaurant);
+          setCategories(cached.categories);
+          setLoading(false);
+          hadCache = true;
+        }
+      } catch {
+        // corrupt/old cache shape — ignore and load fresh below
+      }
+
+      if (!hadCache) setLoading(true);
       setError(null);
       try {
-        const restaurantSnap = await getDoc(restaurantRef(restaurantId));
+        const [restaurantSnap, cats] = await Promise.all([
+          getDoc(restaurantRef(restaurantId)),
+          fetchCategories(restaurantId),
+        ]);
         if (!restaurantSnap.exists()) {
-          if (active) setError('Restaurant not found');
+          if (active && !hadCache) setError('Restaurant not found');
           return;
         }
-        if (active) setRestaurant({ id: restaurantSnap.id, ...restaurantSnap.data() });
-        const cats = await fetchCategories(restaurantId);
-        if (active) setCategories(cats);
+        const freshRestaurant = { id: restaurantSnap.id, ...restaurantSnap.data() };
+        if (active) {
+          setRestaurant(freshRestaurant);
+          setCategories(cats);
+        }
+        try {
+          sessionStorage.setItem(
+            cacheKey,
+            JSON.stringify({ restaurant: freshRestaurant, categories: cats })
+          );
+        } catch {
+          // storage full/unavailable — not worth failing the page load over
+        }
       } catch {
-        if (active) setError('Failed to load menu');
+        // If we already showed cached content, a failed background refresh
+        // shouldn't blank the page — just keep what's on screen.
+        if (active && !hadCache) setError('Failed to load menu');
       } finally {
         if (active) setLoading(false);
       }
