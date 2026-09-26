@@ -814,6 +814,7 @@ export default function AdminPanel() {
                         }}
                         folder={`restaurants/${restaurantId}/hero`}
                         label={`Banner ${i + 1}`}
+                        hint="Best size: 1774 × 887 px (fits the banner perfectly, no cropping)"
                       />
                     </div>
                     {(settings.heroImages?.length || 1) > 1 && (

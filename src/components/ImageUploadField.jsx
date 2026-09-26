@@ -52,7 +52,7 @@ function compressImage(file, maxDimension = MAX_DIMENSION) {
 // A plain <input type="file" accept="image/*"> is enough for the browser
 // to offer "Camera" or "Photo Library" on a phone, and a normal file
 // browser on desktop — no extra branching needed for that part.
-export default function ImageUploadField({ value, onChange, folder, label = 'Image' }) {
+export default function ImageUploadField({ value, onChange, folder, label = 'Image', hint }) {
   const inputRef = useRef(null);
   const [uploading, setUploading] = useState(false);
 
@@ -129,6 +129,7 @@ export default function ImageUploadField({ value, onChange, folder, label = 'Ima
             placeholder="or paste an image URL"
             className="w-full rounded-xl border border-gray-200 px-3 py-2 text-sm"
           />
+          {hint && <p className="text-xs text-gray-400">{hint}</p>}
         </div>
       </div>
     </div>
