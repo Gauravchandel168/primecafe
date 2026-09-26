@@ -42,7 +42,7 @@ import {
   orderRef,
   restaurantRef,
   buildMenuQrUrl,
-  formatEuroPrice,
+  formatPrice,
 } from '../utils/restaurantPaths';
 
 const TABS = [
@@ -59,12 +59,24 @@ const EMPTY_SETTINGS = {
   allergenNote: '',
   openHours: '',
   heroImage: '',
+  heroImages: [],
   phone: '',
   whatsapp: '',
   mapsUrl: '',
   instagramUrl: '',
   facebookUrl: '',
+  currencySymbol: '€',
+  currencyLabel: 'euros',
 };
+
+const CURRENCY_OPTIONS = [
+  { symbol: '€', label: 'euros' },
+  { symbol: '$', label: 'dollars' },
+  { symbol: '£', label: 'pounds' },
+  { symbol: '₹', label: 'rupees' },
+  { symbol: 'R$', label: 'reais' },
+  { symbol: 'CHF', label: 'francs' },
+];
 
 const ORDER_FILTERS = [
   { id: 'all', label: 'All' },
@@ -221,7 +233,9 @@ export default function AdminPanel() {
     e.preventDefault();
     setSavingSettings(true);
     try {
-      await updateDoc(restaurantRef(restaurantId), { ...settings });
+      const heroImages = (settings.heroImages || []).filter((url) => url && url.trim());
+      await updateDoc(restaurantRef(restaurantId), { ...settings, heroImages });
+      setSettings((s) => ({ ...s, heroImages }));
       toast.success('Cafe details updated');
     } catch {
       toast.error('Failed to save settings');
@@ -499,7 +513,7 @@ export default function AdminPanel() {
                   required
                 />
                 <input
-                  placeholder="Price (€)"
+                  placeholder={`Price (${settings.currencySymbol})`}
                   type="number"
                   min="0"
                   step="0.01"
@@ -613,7 +627,7 @@ export default function AdminPanel() {
                             <div className="min-w-0 flex-1">
                               <p className="font-medium">{item.name}</p>
                               <p className="text-sm text-gray-600">
-                                {formatEuroPrice(item.price)}
+                                {formatPrice(item.price, settings.currencySymbol)}
                                 {item.description ? ` · ${item.description.slice(0, 40)}` : ''}
                               </p>
                             </div>
@@ -774,12 +788,95 @@ export default function AdminPanel() {
               />
             </div>
 
-            <ImageUploadField
-              value={settings.heroImage}
-              onChange={(url) => setSettings({ ...settings, heroImage: url })}
-              folder={`restaurants/${restaurantId}/hero`}
-              label="Hero image"
-            />
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                Banner images (up to 4 — they auto-slide on the menu)
+              </label>
+              <div className="space-y-3">
+                {(settings.heroImages?.length
+                  ? settings.heroImages
+                  : settings.heroImage
+                    ? [settings.heroImage]
+                    : ['']
+                ).map((url, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    <div className="flex-1">
+                      <ImageUploadField
+                        value={url}
+                        onChange={(newUrl) => {
+                          const current = settings.heroImages?.length
+                            ? [...settings.heroImages]
+                            : settings.heroImage
+                              ? [settings.heroImage]
+                              : [''];
+                          current[i] = newUrl;
+                          setSettings({ ...settings, heroImages: current, heroImage: '' });
+                        }}
+                        folder={`restaurants/${restaurantId}/hero`}
+                        label={`Banner ${i + 1}`}
+                      />
+                    </div>
+                    {(settings.heroImages?.length || 1) > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const current = settings.heroImages?.length
+                            ? [...settings.heroImages]
+                            : [settings.heroImage];
+                          current.splice(i, 1);
+                          setSettings({ ...settings, heroImages: current });
+                        }}
+                        className="mt-7 rounded-lg border border-gray-200 px-2 py-1 text-xs text-gray-500 hover:bg-gray-50"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+              {(settings.heroImages?.length || (settings.heroImage ? 1 : 0)) < 4 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const current = settings.heroImages?.length
+                      ? [...settings.heroImages]
+                      : settings.heroImage
+                        ? [settings.heroImage]
+                        : [];
+                    current.push('');
+                    setSettings({ ...settings, heroImages: current });
+                  }}
+                  className="mt-2 text-sm font-semibold text-primary hover:underline"
+                >
+                  + Add another banner
+                </button>
+              )}
+            </div>
+
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">Currency</label>
+              <select
+                value={settings.currencySymbol}
+                onChange={(e) => {
+                  const match = CURRENCY_OPTIONS.find((c) => c.symbol === e.target.value);
+                  setSettings({
+                    ...settings,
+                    currencySymbol: e.target.value,
+                    currencyLabel: match?.label || settings.currencyLabel,
+                  });
+                }}
+                className="w-full rounded-xl border border-gray-200 px-3 py-2"
+              >
+                {CURRENCY_OPTIONS.map((c) => (
+                  <option key={c.symbol} value={c.symbol}>
+                    {c.symbol} — {c.label}
+                  </option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-gray-400">
+                Shown on every price, the cart, and the "All prices are in..." note.
+              </p>
+            </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
               <div>
@@ -864,7 +961,7 @@ export default function AdminPanel() {
         open={!!billOrder}
         onClose={() => setBillOrder(null)}
         onMarkPaid={handleMarkPaid}
-        currency="€"
+        currency={billOrder?.currencySymbol || settings.currencySymbol}
       />
     </div>
   );

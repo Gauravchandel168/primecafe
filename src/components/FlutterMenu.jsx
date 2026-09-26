@@ -1,31 +1,76 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FaPhone, FaWhatsapp, FaLocationDot, FaInstagram, FaFacebook } from 'react-icons/fa6';
 import { MdFastfood } from 'react-icons/md';
-import { formatEuroPrice, fetchAvailableItems } from '../utils/restaurantPaths';
+import {
+  formatPrice,
+  fetchAvailableItems,
+} from '../utils/restaurantPaths';
 
 // Fallback copy shown until a cafe fills in its own details from the
 // admin Settings tab — generic, not tied to any specific real business.
 const DEFAULTS = {
   name: 'Your Cafe',
-  heroImage: '/cafe_logo.png',
+  heroImages: ['/default-hero-1.jpg'],
   openHours: '',
   tagline: 'Welcome — take a look at our menu',
   allergenNote: '',
 };
 
+const SLIDE_INTERVAL = 4500;
+
 export function MenuHero({ isMobile, restaurant }) {
   const heroHeight = isMobile ? 200 : 350;
-  const heroImage = restaurant?.heroImage || DEFAULTS.heroImage;
+  // Supports the new heroImages array (up to 4, from admin Settings) and
+  // falls back to a cafe's older single heroImage field, then the
+  // built-in default banner.
+  const heroImages =
+    restaurant?.heroImages?.filter(Boolean)?.length > 0
+      ? restaurant.heroImages.filter(Boolean)
+      : restaurant?.heroImage
+        ? [restaurant.heroImage]
+        : DEFAULTS.heroImages;
   const name = restaurant?.name || DEFAULTS.name;
   const openHours = restaurant?.openHours || DEFAULTS.openHours;
   const phone = restaurant?.phone;
   const whatsapp = restaurant?.whatsapp || phone;
   const mapsUrl = restaurant?.mapsUrl;
 
+  const [slide, setSlide] = useState(0);
+
+  useEffect(() => {
+    setSlide(0);
+    if (heroImages.length <= 1) return;
+    const timer = setInterval(() => {
+      setSlide((i) => (i + 1) % heroImages.length);
+    }, SLIDE_INTERVAL);
+    return () => clearInterval(timer);
+  }, [heroImages.length, restaurant?.id]);
+
   return (
-    <div className="relative w-full bg-black" style={{ height: heroHeight }}>
-      <img src={heroImage} alt={name} className="h-full w-full object-contain" />
+    <div className="relative w-full overflow-hidden bg-black" style={{ height: heroHeight }}>
+      {heroImages.map((src, i) => (
+        <img
+          key={src + i}
+          src={src}
+          alt={name}
+          className="absolute inset-0 h-full w-full object-cover transition-opacity duration-700"
+          style={{ opacity: i === slide ? 1 : 0 }}
+        />
+      ))}
       <div className="absolute inset-0 bg-black/50" />
+
+      {heroImages.length > 1 && (
+        <div className="absolute top-2.5 left-1/2 z-10 flex -translate-x-1/2 gap-1.5 md:top-4">
+          {heroImages.map((_, i) => (
+            <span
+              key={i}
+              className={`h-1.5 w-1.5 rounded-full transition-colors ${
+                i === slide ? 'bg-white' : 'bg-white/40'
+              }`}
+            />
+          ))}
+        </div>
+      )}
 
       {(phone || whatsapp || mapsUrl) && (
         <div className="absolute left-2.5 top-2.5 flex gap-2.5 md:left-4 md:top-4">
@@ -112,10 +157,11 @@ export function MenuFooter({ restaurant }) {
   const instagramUrl = restaurant?.instagramUrl;
   const facebookUrl = restaurant?.facebookUrl;
   const hasSocials = instagramUrl || facebookUrl;
+  const currencyLabel = restaurant?.currencyLabel || 'euros';
 
   return (
     <footer className="mt-8 flex h-[250px] w-full flex-col items-center justify-center bg-[#1C1C1C] py-10 text-center">
-      <p className="text-sm text-white/70">All prices are in euros</p>
+      <p className="text-sm text-white/70">All prices are in {currencyLabel}</p>
       {hasSocials && (
         <>
           <p className="mt-5 text-base font-medium text-white">Follow us !</p>
@@ -142,6 +188,7 @@ export function FlutterMenuItemCard({
   cardWidth,
   cardHeight,
   onAdd,
+  currencySymbol = '€',
 }) {
   const [expanded, setExpanded] = useState(false);
   const description = item.description || '';
@@ -194,7 +241,7 @@ export function FlutterMenuItemCard({
 
         <div className="mt-1 flex items-center justify-between">
           <span className="font-poppins text-xs text-[#101010]">
-            {formatEuroPrice(item.price)}
+            {formatPrice(item.price, currencySymbol)}
           </span>
           {onAdd && (
             <button
@@ -219,6 +266,7 @@ export function MenuCategorySection({
   horizontalPadding,
   isMobile,
   onAdd,
+  currencySymbol = '€',
 }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState([]);
@@ -284,6 +332,7 @@ export function MenuCategorySection({
                   cardWidth={cardWidth}
                   cardHeight={cardHeight}
                   onAdd={onAdd}
+                  currencySymbol={currencySymbol}
                 />
               ))}
             </div>

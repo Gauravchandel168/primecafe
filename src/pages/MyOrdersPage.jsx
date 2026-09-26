@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
+import { useParams, useSearchParams, Link } from 'react-router-dom';
 import { onSnapshot } from 'firebase/firestore';
 import { STATUS_LABELS, STATUS_COLORS } from '../firebase';
 import { orderRef } from '../utils/restaurantPaths';
@@ -82,7 +82,10 @@ function OrderMiniCard({ restaurantId, orderId }) {
 
       <div className="mt-3 flex justify-between border-t border-gray-50 pt-3 text-sm font-bold">
         <span>Total</span>
-        <span className="text-primary">€{order.totalAmount?.toFixed(2)}</span>
+        <span className="text-primary">
+          {order.currencySymbol || '€'}
+          {order.totalAmount?.toFixed(2)}
+        </span>
       </div>
     </Link>
   );
@@ -90,11 +93,31 @@ function OrderMiniCard({ restaurantId, orderId }) {
 
 export default function MyOrdersPage() {
   const { restaurantId } = useParams();
-  const [orderIds, setOrderIds] = useState(() => getStoredOrderIds(restaurantId));
+  const [searchParams] = useSearchParams();
+  const urlOrderId = searchParams.get('order');
+
+  const [orderIds, setOrderIds] = useState(() => {
+    const stored = getStoredOrderIds(restaurantId);
+    if (urlOrderId && !stored.includes(urlOrderId)) {
+      return [...stored, urlOrderId];
+    }
+    return stored;
+  });
 
   useEffect(() => {
-    setOrderIds(getStoredOrderIds(restaurantId));
-  }, [restaurantId]);
+    const stored = getStoredOrderIds(restaurantId);
+    const merged = urlOrderId && !stored.includes(urlOrderId) ? [...stored, urlOrderId] : stored;
+    setOrderIds(merged);
+
+    // The in-app browser some links get opened in (WhatsApp's, for one)
+    // doesn't always persist localStorage reliably — retry the write here
+    // so a later visit has the best chance of finding this order.
+    try {
+      localStorage.setItem(`primecafe_orders_${restaurantId}`, JSON.stringify(merged));
+    } catch {
+      // best-effort only
+    }
+  }, [restaurantId, urlOrderId]);
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-amber-50 to-white">

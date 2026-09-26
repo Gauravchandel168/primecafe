@@ -149,7 +149,7 @@ function MenuContent() {
   useEffect(() => {
     if (!placedOrder) return;
     const timer = setTimeout(() => {
-      navigate(`/my-orders/${restaurantId}`);
+      navigate(`/my-orders/${restaurantId}?order=${placedOrder.orderId}`);
     }, 4000);
     return () => clearTimeout(timer);
   }, [placedOrder, restaurantId, navigate]);
@@ -237,6 +237,8 @@ function MenuContent() {
           status: 'pending',
           timestamp: serverTimestamp(),
           restaurantId,
+          currencySymbol: restaurant?.currencySymbol || '€',
+          currencyLabel: restaurant?.currencyLabel || 'euros',
         };
         const docRef = await withTimeout(addDoc(ordersRef(restaurantId), orderData));
         orderId = docRef.id;
@@ -277,7 +279,7 @@ function MenuContent() {
 
   const handleTrackOrder = () => {
     if (!placedOrder) return;
-    navigate(`/my-orders/${restaurantId}`);
+    navigate(`/my-orders/${restaurantId}?order=${placedOrder.orderId}`);
   };
 
   if (error) {
@@ -330,6 +332,7 @@ function MenuContent() {
                   horizontalPadding={horizontalPadding}
                   isMobile={isMobile}
                   onAdd={handleAdd}
+                  currencySymbol={restaurant?.currencySymbol || '€'}
                 />
                 {index < categories.length - 1 && (
                   <div className="border-t border-gray-300" />
@@ -345,7 +348,13 @@ function MenuContent() {
       {hasOrderHistory && (
         <button
           type="button"
-          onClick={() => navigate(`/my-orders/${restaurantId}`)}
+          onClick={() =>
+            navigate(
+              existingOrderId
+                ? `/my-orders/${restaurantId}?order=${existingOrderId}`
+                : `/my-orders/${restaurantId}`
+            )
+          }
           className="fixed bottom-6 left-6 z-30 rounded-full bg-dark px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:opacity-90 active:scale-95"
         >
           View my orders
@@ -361,7 +370,7 @@ function MenuContent() {
         onClose={() => setCartOpen(false)}
         onPlaceOrder={handlePlaceOrder}
         placing={placing}
-        currency="€"
+        currency={restaurant?.currencySymbol || '€'}
       />
 
       {placedOrder && (

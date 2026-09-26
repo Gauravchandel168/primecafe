@@ -90,9 +90,6 @@ export function formatPrice(price, currency = '€') {
 }
 
 // Kept for backward compatibility with any existing callers.
-export function formatEuroPrice(price) {
-  return formatPrice(price, '€');
-}
 
 export function resolveMenuRestaurantId(params, searchParams) {
   return (

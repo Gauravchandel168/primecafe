@@ -142,14 +142,18 @@ export default function OrderStatusPage() {
                   {item.name}{' '}
                   <span className="text-gray-400">× {item.quantity}</span>
                 </span>
-                <span>€{(item.price * item.quantity).toFixed(2)}</span>
+                <span>
+                  {order.currencySymbol || '€'}
+                  {(item.price * item.quantity).toFixed(2)}
+                </span>
               </li>
             ))}
           </ul>
           <div className="mt-4 flex justify-between border-t pt-4 text-lg font-bold">
             <span>Total</span>
             <span className="text-primary">
-              €{order.totalAmount?.toFixed(2)}
+              {order.currencySymbol || '€'}
+              {order.totalAmount?.toFixed(2)}
             </span>
           </div>
         </div>
