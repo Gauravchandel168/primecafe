@@ -54,9 +54,22 @@ export default function OrderCard({
               {timestamp.toLocaleString()}
             </p>
           )}
+          {order.customerName && (
+            <p className="mt-1 text-sm text-gray-600">
+              {order.customerName}
+              {order.customerPhone && (
+                <>
+                  {' · '}
+                  <a href={`tel:${order.customerPhone}`} className="text-primary hover:underline">
+                    {order.customerPhone}
+                  </a>
+                </>
+              )}
+            </p>
+          )}
         </div>
         <span className="text-xl font-bold text-primary">
-          €{order.totalAmount?.toFixed(2)}
+          {order.currencySymbol || '€'}{order.totalAmount?.toFixed(2)}
         </span>
       </div>
 
@@ -67,7 +80,10 @@ export default function OrderCard({
               {item.name}{' '}
               <span className="text-gray-400">× {item.quantity}</span>
             </span>
-            <span>€{(item.price * item.quantity).toFixed(2)}</span>
+            <span>
+              {order.currencySymbol || '€'}
+              {(item.price * item.quantity).toFixed(2)}
+            </span>
           </li>
         ))}
       </ul>

@@ -6,6 +6,7 @@ import { syncOrderToRTDB } from '../firebase';
 import { CartProvider, useCart } from '../context/CartContext';
 import CartDrawer from '../components/CartDrawer';
 import OrderSuccessModal from '../components/OrderSuccessModal';
+import CustomerDetailsModal from '../components/CustomerDetailsModal';
 import { FloatingCartButton } from '../components/NotificationBadge';
 import {
   MenuHero,
@@ -72,6 +73,16 @@ function MenuContent() {
       return Array.isArray(ids) && ids.length > 0;
     } catch {
       return false;
+    }
+  });
+  const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [customerInfo, setCustomerInfo] = useState(() => {
+    try {
+      const name = localStorage.getItem('primecafe_customer_name') || '';
+      const phone = localStorage.getItem('primecafe_customer_phone') || '';
+      return name && phone ? { name, phone } : null;
+    } catch {
+      return null;
     }
   });
 
@@ -169,8 +180,18 @@ function MenuContent() {
     toast.success(`${item.name} added`);
   };
 
-  const handlePlaceOrder = async () => {
+  const handlePlaceOrder = async (info) => {
     if (items.length === 0) return;
+
+    // Need a name + verified phone number before anything gets sent to
+    // the kitchen. If we don't already have one on file, ask for it and
+    // come back here once the modal hands it back.
+    const customer = info || customerInfo;
+    if (!customer) {
+      setShowCustomerModal(true);
+      return;
+    }
+
     setPlacing(true);
 
     const newItems = items.map(({ id, name, price, quantity }) => ({
@@ -239,6 +260,8 @@ function MenuContent() {
           restaurantId,
           currencySymbol: restaurant?.currencySymbol || '€',
           currencyLabel: restaurant?.currencyLabel || 'euros',
+          customerName: customer.name,
+          customerPhone: customer.phone,
         };
         const docRef = await withTimeout(addDoc(ordersRef(restaurantId), orderData));
         orderId = docRef.id;
@@ -280,6 +303,18 @@ function MenuContent() {
   const handleTrackOrder = () => {
     if (!placedOrder) return;
     navigate(`/my-orders/${restaurantId}?order=${placedOrder.orderId}`);
+  };
+
+  const handleCustomerDetailsSubmit = (info) => {
+    try {
+      localStorage.setItem('primecafe_customer_name', info.name);
+      localStorage.setItem('primecafe_customer_phone', info.phone);
+    } catch {
+      // best-effort only — still place the order even if storage fails
+    }
+    setCustomerInfo(info);
+    setShowCustomerModal(false);
+    handlePlaceOrder(info);
   };
 
   if (error) {
@@ -368,7 +403,7 @@ function MenuContent() {
       <CartDrawer
         open={cartOpen}
         onClose={() => setCartOpen(false)}
-        onPlaceOrder={handlePlaceOrder}
+        onPlaceOrder={() => handlePlaceOrder()}
         placing={placing}
         currency={restaurant?.currencySymbol || '€'}
       />
@@ -378,6 +413,15 @@ function MenuContent() {
           tableNumber={placedOrder.tableNumber}
           isAddOn={placedOrder.isAddOn}
           onTrackOrder={handleTrackOrder}
+        />
+      )}
+
+      {showCustomerModal && (
+        <CustomerDetailsModal
+          savedName={customerInfo?.name}
+          savedPhone={customerInfo?.phone}
+          onSubmit={handleCustomerDetailsSubmit}
+          onClose={() => setShowCustomerModal(false)}
         />
       )}
     </div>
