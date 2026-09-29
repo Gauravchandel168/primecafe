@@ -83,6 +83,7 @@ const ORDER_FILTERS = [
   { id: 'pending', label: 'Pending' },
   { id: 'active', label: 'Active' },
   { id: 'completed', label: 'Completed' },
+  { id: 'cancelled', label: 'Cancelled' },
 ];
 
 const EMPTY_ITEM = {
@@ -106,6 +107,8 @@ export default function AdminPanel() {
   const [pendingCount, setPendingCount] = useState(0);
   const [categoryName, setCategoryName] = useState('');
   const [savingCategory, setSavingCategory] = useState(false);
+  const [editingCategoryId, setEditingCategoryId] = useState(null);
+  const [editingCategoryName, setEditingCategoryName] = useState('');
   const [newItem, setNewItem] = useState(EMPTY_ITEM);
   const [editing, setEditing] = useState(null);
   const [tableNumber, setTableNumber] = useState('1');
@@ -114,6 +117,7 @@ export default function AdminPanel() {
   const settingsLoaded = useRef(false);
   const knownOrderIds = useRef(new Set());
   const initialLoad = useRef(true);
+  const prevOrderState = useRef(new Map());
 
   useDocumentTitleBadge(pendingCount);
 
@@ -152,8 +156,39 @@ export default function AdminPanel() {
             playNewOrderSound();
           }
         });
+
+        // A customer changing something on an order that's already in the
+        // kitchen flow is easy to miss — call it out as it happens.
+        data.forEach((order) => {
+          const prev = prevOrderState.current.get(order.id);
+          if (!prev) return;
+          if (
+            prev.status !== 'cancelled' &&
+            order.status === 'cancelled' &&
+            order.cancelledBy === 'customer'
+          ) {
+            toast.error(`Table ${order.tableNumber} cancelled their order`, {
+              icon: '🚫',
+            });
+            playNewOrderSound();
+          } else if (
+            String(prev.tableNumber) !== String(order.tableNumber) &&
+            order.tableChangedBy === 'customer'
+          ) {
+            toast(`Table ${prev.tableNumber} moved to Table ${order.tableNumber}`, {
+              icon: '🔀',
+            });
+            playNewOrderSound();
+          }
+        });
       }
 
+      data.forEach((o) =>
+        prevOrderState.current.set(o.id, {
+          status: o.status,
+          tableNumber: o.tableNumber,
+        })
+      );
       data.forEach((o) => knownOrderIds.current.add(o.id));
       initialLoad.current = false;
       setOrders(data);
@@ -208,6 +243,8 @@ export default function AdminPanel() {
         );
       case 'completed':
         return orders.filter((o) => ['delivered', 'paid'].includes(o.status));
+      case 'cancelled':
+        return orders.filter((o) => o.status === 'cancelled');
       default:
         return orders;
     }
@@ -227,6 +264,68 @@ export default function AdminPanel() {
   const handleMarkPaid = async (orderId) => {
     await handleStatusChange(orderId, 'paid');
     toast.success('Marked as paid');
+  };
+
+  // Staff found out the customer is sitting at a different table.
+  const handleEditTable = async (orderId, newTable) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
+    try {
+      await updateDoc(orderRef(restaurantId, orderId), {
+        tableNumber: newTable,
+        previousTableNumber: String(order.tableNumber ?? ''),
+        tableChangedBy: 'admin',
+        tableChangedAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+      try {
+        await syncOrderToRTDB(restaurantId, orderId, {
+          status: order.status,
+          tableNumber: newTable,
+          totalAmount: order.totalAmount ?? 0,
+        });
+      } catch (rtdbErr) {
+        console.warn('RTDB sync failed (table was still updated):', rtdbErr);
+      }
+      toast.success(`Order moved to Table ${newTable}`);
+    } catch (err) {
+      console.error('Failed to update table:', err);
+      toast.error('Failed to update the table');
+    }
+  };
+
+  const handleCancelOrder = async (orderId) => {
+    const order = orders.find((o) => o.id === orderId);
+    if (!order) return;
+    if (
+      !window.confirm(
+        `Cancel the order for Table ${order.tableNumber}? This can't be undone.`
+      )
+    ) {
+      return;
+    }
+    try {
+      await updateDoc(orderRef(restaurantId, orderId), {
+        status: 'cancelled',
+        cancelledBy: 'admin',
+        cancelledAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        isUpdated: false,
+      });
+      try {
+        await syncOrderToRTDB(restaurantId, orderId, {
+          status: 'cancelled',
+          tableNumber: order.tableNumber ?? '',
+          totalAmount: order.totalAmount ?? 0,
+        });
+      } catch (rtdbErr) {
+        console.warn('RTDB sync failed (order was still cancelled):', rtdbErr);
+      }
+      toast.success('Order cancelled');
+    } catch (err) {
+      console.error('Failed to cancel order:', err);
+      toast.error('Failed to cancel the order');
+    }
   };
 
   const handleSaveSettings = async (e) => {
@@ -272,6 +371,18 @@ export default function AdminPanel() {
     );
     await deleteDoc(categoryRef(restaurantId, categoryId));
     toast.success('Category deleted');
+  };
+
+  const handleRenameCategory = async (categoryId) => {
+    const name = editingCategoryName.trim();
+    if (!name) return;
+    try {
+      await updateDoc(categoryRef(restaurantId, categoryId), { name });
+      setEditingCategoryId(null);
+      toast.success('Category updated');
+    } catch {
+      toast.error('Failed to update category');
+    }
   };
 
   const handleAddItem = async (e) => {
@@ -426,6 +537,8 @@ export default function AdminPanel() {
                     order={order}
                     onStatusChange={handleStatusChange}
                     onGenerateBill={setBillOrder}
+                    onEditTable={handleEditTable}
+                    onCancelOrder={handleCancelOrder}
                   />
                 ))}
               </div>
@@ -464,16 +577,57 @@ export default function AdminPanel() {
                   {categories.map((cat) => (
                     <li
                       key={cat.id}
-                      className="flex items-center justify-between rounded-xl bg-[#F5EFE6] px-4 py-3"
+                      className="flex items-center justify-between gap-2 rounded-xl bg-[#F5EFE6] px-4 py-3"
                     >
-                      <span className="font-medium">{cat.name}</span>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteCategory(cat.id)}
-                        className="text-sm text-red-600 hover:underline"
-                      >
-                        Delete
-                      </button>
+                      {editingCategoryId === cat.id ? (
+                        <>
+                          <input
+                            value={editingCategoryName}
+                            onChange={(e) => setEditingCategoryName(e.target.value)}
+                            autoFocus
+                            className="flex-1 rounded-lg border border-gray-300 px-2 py-1"
+                          />
+                          <div className="flex shrink-0 gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleRenameCategory(cat.id)}
+                              className="text-sm font-semibold text-primary hover:underline"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingCategoryId(null)}
+                              className="text-sm text-gray-500 hover:underline"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          <span className="font-medium">{cat.name}</span>
+                          <div className="flex shrink-0 gap-3">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingCategoryId(cat.id);
+                                setEditingCategoryName(cat.name);
+                              }}
+                              className="text-sm text-gray-600 hover:underline"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCategory(cat.id)}
+                              className="text-sm text-red-600 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </>
+                      )}
                     </li>
                   ))}
                 </ul>

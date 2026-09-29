@@ -47,16 +47,36 @@ service cloud.firestore {
         allow create: if true;
         allow delete: if isRestaurantAdmin(restaurantId);
 
-        // A customer adding more items to their own order later (before
-        // the kitchen has started preparing it) may only touch the
-        // items/total/isUpdated fields — status, table number and
-        // everything else stays locked to staff.
-        allow update: if isRestaurantAdmin(restaurantId) || (
-          resource.data.status in ['pending', 'confirmed']
-          && request.resource.data.status == resource.data.status
-          && request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['items', 'totalAmount', 'isUpdated', 'updatedAt'])
-        );
+        // What a customer (anyone holding the order's id) may change on
+        // their own order — each path is limited to specific fields so
+        // they can never touch prices, status flow, or other people's data:
+        //  1. add more items while it's still pending/confirmed
+        //  2. move it to a different table while it's still open
+        //  3. cancel it, but only before the kitchen has started
+        allow update: if isRestaurantAdmin(restaurantId)
+          || (
+            resource.data.status in ['pending', 'confirmed']
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['items', 'totalAmount', 'isUpdated', 'updatedAt'])
+          )
+          || (
+            resource.data.status in ['pending', 'confirmed', 'preparing', 'ready']
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.tableNumber is string
+            && request.resource.data.tableNumber.size() > 0
+            && request.resource.data.tableNumber.size() <= 20
+            && request.resource.data.tableChangedBy == 'customer'
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['tableNumber', 'previousTableNumber', 'tableChangedBy', 'tableChangedAt', 'updatedAt'])
+          )
+          || (
+            resource.data.status in ['pending', 'confirmed']
+            && request.resource.data.status == 'cancelled'
+            && request.resource.data.cancelledBy == 'customer'
+            && request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['status', 'cancelledBy', 'cancelledAt', 'updatedAt'])
+          );
       }
     }
 

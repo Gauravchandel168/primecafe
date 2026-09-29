@@ -7,6 +7,7 @@ import { CartProvider, useCart } from '../context/CartContext';
 import CartDrawer from '../components/CartDrawer';
 import OrderSuccessModal from '../components/OrderSuccessModal';
 import CustomerDetailsModal from '../components/CustomerDetailsModal';
+import TableMovePrompt from '../components/TableMovePrompt';
 import { FloatingCartButton } from '../components/NotificationBadge';
 import {
   MenuHero,
@@ -48,12 +49,73 @@ function addOrderToHistory(restaurantId, orderId) {
   }
 }
 
+// How long an order stays eligible for each behaviour below. Tweak here.
+const MERGE_WINDOW_MS = 2 * 60 * 60 * 1000; // add-on items merge into a same-table order this recent
+const PROMPT_WINDOW_MS = 20 * 60 * 1000; // "did you order at another table?" only for orders this recent
+const OPEN_STATUSES = ['pending', 'confirmed', 'preparing', 'ready'];
+
+// "1", "01 " and "Table 1" style typos shouldn't cause a false mismatch.
+function normalizeTable(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function tsToMs(ts) {
+  if (!ts) return 0;
+  if (typeof ts.toMillis === 'function') return ts.toMillis();
+  if (typeof ts.seconds === 'number') return ts.seconds * 1000;
+  if (typeof ts === 'number') return ts;
+  return 0;
+}
+
+// Most recent moment anything happened on the order (placed or updated).
+function lastActivityMs(order) {
+  return Math.max(tsToMs(order?.timestamp), tsToMs(order?.updatedAt));
+}
+
+// Every order id this phone has placed for this cafe, oldest first. Also
+// folds in the older single "latest order" pointer for anyone who ordered
+// before the full history list existed.
+function readOrderHistory(restaurantId) {
+  try {
+    const raw = localStorage.getItem(`primecafe_orders_${restaurantId}`);
+    const ids = raw ? JSON.parse(raw) : [];
+    const list = Array.isArray(ids) ? [...ids] : [];
+    const latest = localStorage.getItem(`primecafe_order_${restaurantId}`);
+    if (latest && !list.includes(latest)) list.push(latest);
+    return list;
+  } catch {
+    return [];
+  }
+}
+
 function MenuContent() {
   const params = useParams();
   const [searchParams] = useSearchParams();
   const restaurantId = resolveMenuRestaurantId(params, searchParams);
-  const tableNumber = searchParams.get('table') || '1';
+  const tableParam = (searchParams.get('table') || '').trim();
+  // Coming back to the menu from another page (e.g. "Order more items" on
+  // My Orders) may not carry ?table= — fall back to the table this visit
+  // was opened with, so an order never silently lands on "Table 1".
+  let rememberedTable = '';
+  try {
+    rememberedTable = (sessionStorage.getItem(`primecafe_table_${restaurantId}`) || '').trim();
+  } catch {
+    // sessionStorage unavailable — fine, we just won't have a fallback
+  }
+  const effectiveTable = tableParam || rememberedTable;
+  const hasTableParam = effectiveTable.length > 0;
+  const tableNumber = hasTableParam ? effectiveTable : '1';
   const navigate = useNavigate();
+
+  // Link to the My Orders page, carrying the table so "Order more items"
+  // from there stays on the right table.
+  const myOrdersUrl = (orderId) => {
+    const qs = new URLSearchParams();
+    if (orderId) qs.set('order', orderId);
+    if (hasTableParam) qs.set('table', tableNumber);
+    const q = qs.toString();
+    return `/my-orders/${restaurantId}${q ? `?${q}` : ''}`;
+  };
 
   const [categories, setCategories] = useState([]);
   const [restaurant, setRestaurant] = useState(null);
@@ -76,6 +138,8 @@ function MenuContent() {
     }
   });
   const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [movePrompt, setMovePrompt] = useState(null); // an open order at a different table
+  const [movePromptBusy, setMovePromptBusy] = useState(false);
   const [customerInfo, setCustomerInfo] = useState(() => {
     try {
       const name = localStorage.getItem('primecafe_customer_name') || '';
@@ -160,10 +224,59 @@ function MenuContent() {
   useEffect(() => {
     if (!placedOrder) return;
     const timer = setTimeout(() => {
-      navigate(`/my-orders/${restaurantId}?order=${placedOrder.orderId}`);
+      navigate(myOrdersUrl(placedOrder.orderId));
     }, 4000);
     return () => clearTimeout(timer);
   }, [placedOrder, restaurantId, navigate]);
+
+  useEffect(() => {
+    if (!restaurantId || !tableParam) return;
+    try {
+      sessionStorage.setItem(`primecafe_table_${restaurantId}`, tableParam);
+    } catch {
+      // best-effort only
+    }
+  }, [restaurantId, tableParam]);
+
+  // Scanning a different table's QR while an earlier order of ours is still
+  // open somewhere else? Ask whether to move that order here (or cancel it).
+  useEffect(() => {
+    if (!restaurantId || !hasTableParam) return undefined;
+    let active = true;
+
+    (async () => {
+      const ids = readOrderHistory(restaurantId).slice(-5).reverse();
+      if (ids.length === 0) return;
+
+      const snaps = await Promise.all(
+        ids.map((id) =>
+          withTimeout(getDoc(orderRef(restaurantId, id)), 8000).catch(() => null)
+        )
+      );
+
+      for (let i = 0; i < ids.length; i += 1) {
+        const existing = snaps[i] && snaps[i].exists() ? snaps[i].data() : null;
+        if (!existing) continue;
+        if (!OPEN_STATUSES.includes(existing.status)) continue;
+        if (normalizeTable(existing.tableNumber) === normalizeTable(tableNumber)) continue;
+        if (Date.now() - lastActivityMs(existing) > PROMPT_WINDOW_MS) continue;
+
+        const dismissKey = `primecafe_move_prompt_${ids[i]}_${normalizeTable(tableNumber)}`;
+        try {
+          if (sessionStorage.getItem(dismissKey)) continue;
+        } catch {
+          // no sessionStorage — just show the prompt
+        }
+
+        if (active) setMovePrompt({ id: ids[i], ...existing });
+        return;
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [restaurantId, tableNumber, hasTableParam]);
 
   const horizontalPadding = isMobile ? 12 : 80;
   const cardWidth = isMobile ? 160 : 250;
@@ -183,14 +296,14 @@ function MenuContent() {
   const handlePlaceOrder = async (info) => {
     if (items.length === 0) return;
 
-    // Need a name + verified phone number before anything gets sent to
-    // the kitchen. If we don't already have one on file, ask for it and
-    // come back here once the modal hands it back.
-    const customer = info || customerInfo;
-    if (!customer) {
+    // Always let the customer confirm (or fix) their name/number before
+    // anything goes to the kitchen — the modal comes pre-filled from last
+    // time so this is normally just one tap, not retyping everything.
+    if (!info) {
       setShowCustomerModal(true);
       return;
     }
+    const customer = info;
 
     setPlacing(true);
 
@@ -202,24 +315,31 @@ function MenuContent() {
     }));
 
     try {
-      const existingOrderId = localStorage.getItem(`primecafe_order_${restaurantId}`);
       let orderId = null;
       let isAddOn = false;
 
-      if (existingOrderId) {
-        try {
-          const existingSnap = await withTimeout(
-            getDoc(orderRef(restaurantId, existingOrderId))
-          );
-          const existing = existingSnap.exists() ? existingSnap.data() : null;
+      // Only merge into an order that is (1) at this same table, (2) still
+      // pending/confirmed, and (3) recent. If the link has no ?table= we
+      // can't tell whose table this is, so we never merge in that case.
+      if (hasTableParam) {
+        const candidateIds = readOrderHistory(restaurantId).slice(-5).reverse();
+        const snaps = await Promise.all(
+          candidateIds.map((id) =>
+            withTimeout(getDoc(orderRef(restaurantId, id)), 8000).catch(() => null)
+          )
+        );
 
-          // Only merge into an order the kitchen hasn't started on yet.
-          // Once it's preparing/ready/delivered, a fresh order is safer
-          // than quietly changing what's already being made.
-          if (existing && ['pending', 'confirmed'].includes(existing.status)) {
+        for (let i = 0; i < candidateIds.length && !orderId; i += 1) {
+          const existing = snaps[i] && snaps[i].exists() ? snaps[i].data() : null;
+          if (!existing) continue;
+          if (!['pending', 'confirmed'].includes(existing.status)) continue;
+          if (normalizeTable(existing.tableNumber) !== normalizeTable(tableNumber)) continue;
+          if (Date.now() - lastActivityMs(existing) > MERGE_WINDOW_MS) continue;
+
+          try {
             const mergedItems = [...(existing.items || [])];
             for (const item of newItems) {
-              const match = mergedItems.find((i) => i.id === item.id);
+              const match = mergedItems.find((it) => it.id === item.id);
               if (match) {
                 match.quantity += item.quantity;
               } else {
@@ -227,12 +347,12 @@ function MenuContent() {
               }
             }
             const mergedTotal = mergedItems.reduce(
-              (sum, i) => sum + i.price * i.quantity,
+              (sum, it) => sum + it.price * it.quantity,
               0
             );
 
             await withTimeout(
-              updateDoc(orderRef(restaurantId, existingOrderId), {
+              updateDoc(orderRef(restaurantId, candidateIds[i]), {
                 items: mergedItems,
                 totalAmount: mergedTotal,
                 isUpdated: true,
@@ -240,13 +360,13 @@ function MenuContent() {
               })
             );
 
-            orderId = existingOrderId;
+            orderId = candidateIds[i];
             isAddOn = true;
+          } catch (mergeErr) {
+            // e.g. staff moved it to "preparing" a moment ago and the rules
+            // rejected the edit — fall through and place a fresh order.
+            console.warn('Could not merge into existing order, placing a new one:', mergeErr);
           }
-        } catch (lookupErr) {
-          // If we can't confirm the old order is still open, don't block
-          // the customer — just place a fresh order below.
-          console.warn('Could not check existing order, placing a new one:', lookupErr);
         }
       }
 
@@ -300,9 +420,69 @@ function MenuContent() {
     }
   };
 
+  const dismissMovePrompt = () => {
+    if (movePrompt) {
+      try {
+        sessionStorage.setItem(
+          `primecafe_move_prompt_${movePrompt.id}_${normalizeTable(tableNumber)}`,
+          '1'
+        );
+      } catch {
+        // best-effort only
+      }
+    }
+    setMovePrompt(null);
+  };
+
+  const handleMoveOrderHere = async () => {
+    if (!movePrompt) return;
+    setMovePromptBusy(true);
+    try {
+      await withTimeout(
+        updateDoc(orderRef(restaurantId, movePrompt.id), {
+          tableNumber,
+          previousTableNumber: String(movePrompt.tableNumber ?? ''),
+          tableChangedBy: 'customer',
+          tableChangedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+      toast.success(`Your order is now on Table ${tableNumber}`);
+      setMovePrompt(null);
+    } catch (err) {
+      console.error('Failed to move order:', err);
+      toast.error("Couldn't move your order. Please ask a staff member.");
+    } finally {
+      setMovePromptBusy(false);
+    }
+  };
+
+  const handleCancelOldOrder = async () => {
+    if (!movePrompt) return;
+    setMovePromptBusy(true);
+    try {
+      await withTimeout(
+        updateDoc(orderRef(restaurantId, movePrompt.id), {
+          status: 'cancelled',
+          cancelledBy: 'customer',
+          cancelledAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        })
+      );
+      toast.success('Your order was cancelled');
+      setMovePrompt(null);
+    } catch (err) {
+      // Most likely the kitchen started on it a moment ago.
+      console.error('Failed to cancel order:', err);
+      toast.error("Couldn't cancel — it may already be in preparation. Please ask a staff member.");
+    } finally {
+      setMovePromptBusy(false);
+    }
+  };
+
   const handleTrackOrder = () => {
     if (!placedOrder) return;
-    navigate(`/my-orders/${restaurantId}?order=${placedOrder.orderId}`);
+    navigate(myOrdersUrl(placedOrder.orderId));
   };
 
   const handleCustomerDetailsSubmit = (info) => {
@@ -384,11 +564,7 @@ function MenuContent() {
         <button
           type="button"
           onClick={() =>
-            navigate(
-              existingOrderId
-                ? `/my-orders/${restaurantId}?order=${existingOrderId}`
-                : `/my-orders/${restaurantId}`
-            )
+            navigate(myOrdersUrl(existingOrderId))
           }
           className="fixed bottom-6 left-6 z-30 rounded-full bg-dark px-4 py-3 text-sm font-semibold text-white shadow-lg transition hover:opacity-90 active:scale-95"
         >
@@ -413,6 +589,18 @@ function MenuContent() {
           tableNumber={placedOrder.tableNumber}
           isAddOn={placedOrder.isAddOn}
           onTrackOrder={handleTrackOrder}
+        />
+      )}
+
+      {movePrompt && (
+        <TableMovePrompt
+          order={movePrompt}
+          newTable={tableNumber}
+          minutesAgo={Math.max(0, Math.round((Date.now() - lastActivityMs(movePrompt)) / 60000))}
+          busy={movePromptBusy}
+          onMove={handleMoveOrderHere}
+          onCancelOrder={handleCancelOldOrder}
+          onKeep={dismissMovePrompt}
         />
       )}
 
